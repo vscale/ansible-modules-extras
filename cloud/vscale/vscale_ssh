@@ -1,0 +1,264 @@
+#!/usr/bin/env python
+#
+# (c) 2015, Vscale Team <hello@vscale.io>
+#
+# This file is part of Ansible
+#
+# Ansible is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Ansible is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+
+DOCUMENTATION = '''
+---
+module: vscale_ssh
+short_description: vscale.io scalets management
+description:
+    - Addes SSH key
+    - Deletes SSH key
+version_added: "1.0"
+author: Sergey Krasnopivets (@skrasnopivets)
+options:
+  token:
+    description:
+     - Vscale API token
+    required: true
+  state:
+    description:
+     - Indicate desired state of the SSH key.
+    required: true
+    default: present
+    choices: ['present', 'absent']
+  name:
+    description:
+     - Name of SSH key
+    required: true
+  public_key:
+     - SSh key string for add key
+'''
+
+EXAMPLES = '''
+# Create a new SSH key
+- vscale_ssh: >
+      token=XXX
+      name=key_name
+      public_key=XXX
+      state=present
+# Delete SSH key from account
+- vscale_ssh: >
+      token=XXX
+      name=key_name
+      state=absent
+'''
+
+import requests
+import json
+import logging
+from time import sleep
+import time
+
+# Set log level
+logging.basicConfig(level=logging.CRITICAL)
+
+
+class VscaleAPIException(Exception):
+    pass
+
+
+class VscaleAPI:
+
+    def __init__(self, token, **kwargs):
+        self.log = logging.getLogger(self.__class__.__name__)
+
+        if not token:
+            self.log.error("No token given, cannot initialize API instance")
+            raise VscaleAPIException("No token")
+
+        self.token = token
+
+        # Initialize default values
+        if 'version' in kwargs:
+            self.version = kwargs['version']
+        else:
+            self.version = 1
+
+        if 'url' in kwargs:
+            self.url = kwargs['url']
+        else:
+            self.url = 'https://api.vscale.io/v%s' % self.version
+
+        if 'blocking' in kwargs:
+            self.blocking = kwargs['blocking']
+        else:
+            self.blocking = True
+
+        if 'timeout' in kwargs:
+            self.timeout = kwargs['timeout']
+        else:
+            self.timeout = 300
+
+        if 'poll_interval' in kwargs:
+            self.poll_interval = kwargs['poll_interval']
+        else:
+            self.poll_interval = 5
+
+    def _rq(self, method, path, payload=None):
+        headers = {
+            'X-Token': self.token,
+            'Content-Type': 'application/json;charset=utf-8'
+        }
+
+        rq_url = self.url + path
+        self.log.debug('Sending "%s %s" request' % (method, rq_url))
+        if payload:
+            self.log.debug('Request payload: %s' %
+                           json.dumps(payload, indent=4))
+
+        if method == 'GET':
+            rq = requests.get(rq_url, headers=headers)
+        elif method == 'POST':
+            rq = requests.post(
+                rq_url, headers=headers, data=json.dumps(payload))
+        elif method == 'PUT':
+            rq = requests.put(
+                rq_url, headers=headers, data=json.dumps(payload))
+        elif method == 'PATCH':
+            rq = requests.patch(
+                rq_url, headers=headers, data=json.dumps(payload))
+        elif method == 'DELETE':
+            rq = requests.delete(
+                rq_url, headers=headers, data=json.dumps(payload))
+        else:
+            raise VscaleAPIException('Unknown method "%s"' % method)
+
+        if rq.status_code < 200 or rq.status_code > 299:
+            backend_error = rq.headers[
+                'Vscale-Error-Message'] if 'Vscale-Error-Message' in rq.headers else 'Unknown error'
+            raise VscaleAPIException(
+                '%s request to %s failed: %s' % (method, path, backend_error))
+
+        self.log.debug("Got response(%s): %s" % (rq.status_code,
+                                                 json.dumps(rq.json(), indent=4)))
+
+        # Wait for task to complete if we're blocking and have task ID
+        task_id = rq.headers[
+            'Vscale-Task-Id'] if 'Vscale-Task-Id' in rq.headers else None
+        if task_id and self.blocking:
+            self.task_waitcomplete(task_id)
+
+        return rq.json()
+
+    def task_waitcomplete(self, task_id):
+        start_time = time.time()
+        while time.time() < (start_time + self.timeout):
+            task = self.task_get(task_id)
+            if task['done']:
+                break
+            sleep(self.poll_interval)
+
+        if not task['done']:
+            self.log.error('Timeout waiting task "%s": %s' %
+                           (task['id'], task['method']))
+            raise VscaleAPIException("Task timeout %s" % task['id'])
+
+        if task['error']:
+            self.log.error(
+                'Backend failed to complete task "%s": %s' % (task['id'], task['method']))
+            raise VscaleAPIException("Task failed %s" % task['id'])
+        self.log.info('Task "%s" "%s" completed successfully' %
+                      (task['id'], task['method']))
+
+    ##### Sshkey ops #####
+    def sshkey_create(self, name, pubkey):
+        payload = {
+            "name":         name,
+            "key":          pubkey
+        }
+
+        return self._rq('POST', '/sshkeys', payload)
+
+    def sshkey_list(self):
+        return self._rq('GET', '/sshkeys')
+
+    def sshkey_get(self, key_id):
+        return self._rq('GET', '/sshkeys/%s' % key_id)
+
+    def sshkey_delete(self, key_id):
+        return self._rq('DELETE', '/sshkeys/%s' % key_id)
+
+
+class VscaleAnsible:
+
+    def __init__(self, token, module):
+
+        self.vscale = VscaleAPI(token)
+        self.module = module
+
+    def checks(self):
+
+        keylist = self.vscale.sshkey_list()
+        key_present = False
+
+        for key in keylist:
+            if key['name'] == self.module.params['name']:
+                key_present = True
+            if key['key'] == self.module.params['public_key'] and self.module.params['state'] == 'present':
+                self.module.exit_json(
+                    changed=False, msg="Key %s alerady present. No changes" % key['name'])
+            elif key['key'] != self.module.params['public_key'] and self.module.params['state'] == 'present':
+                self.vscale.sshkey_delete(key['id'])
+                self.vscale.sshkey_create(
+                    self.module.params['name'], self.module.params['public_key'])
+                self.module.exit_json(
+                    changed=key_present, msg="Key %s changed" % key['name'])
+            elif key['name'] == self.module.params['name'] and self.module.params['state'] == 'absent':
+                self.vscale.sshkey_delete(key['id'])
+                self.module.exit_json(
+                    changed=key_present, msg="Key %s deleted" % key['name'])
+        return key_present
+
+    def key_create(self):
+
+        key_present = self.checks()
+
+        if key_present == False and self.module.params['state'] == 'present':
+            newkey = self.vscale.sshkey_create(
+                self.module.params['name'], self.module.params['public_key'])
+            self.module.exit_json(
+                changed=True, msg="Key %s successfully added" % newkey['name'])
+        else:
+            self.module.fail_json(
+                changed=False, msg="Error. Something went wrong.")
+
+
+def main():
+    module = AnsibleModule(
+        argument_spec=dict(
+            name=dict(type='str'),
+            public_key=dict(type='str'),
+            state=dict(choices=['present', 'absent'], default='present'),
+            token=dict(type='str')
+        ),
+        required_one_of=(
+            ['name'],),
+        supports_check_mode=True
+    )
+
+    vs_obj = VscaleAnsible(module.params['token'], module)
+
+    if module.params:
+        vs_obj.checks()
+        if vs_obj.checks() == False:
+            vs_obj.key_create()
+
+from ansible.module_utils.basic import *
+if __name__ == '__main__':
+    main()
