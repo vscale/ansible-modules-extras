@@ -214,7 +214,6 @@ class VscaleAnsible:
                 self.module.exit_json(
                     changed=False, msg="Key %s alerady present. No changes" % key['name'])
             elif key['key'] != self.module.params['public_key'] and self.module.params['state'] == 'present':
-                self.vscale.sshkey_delete(key['id'])
                 self.vscale.sshkey_create(
                     self.module.params['name'], self.module.params['public_key'])
                 self.module.exit_json(

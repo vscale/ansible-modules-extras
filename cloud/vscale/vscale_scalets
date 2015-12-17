@@ -332,12 +332,12 @@ class VscaleAnsible:
         return result
 
     def check_state(self):
-        scalet = self.search('scalet', self.module.params['name'], self.vscale.scalet_list(), self.module)
+        scalet = self.search('scalet', self.module.params['name'], self.vscale.scalet_list())
         state = self.vscale.scalet_get(scalet)
         return state['status']
 
     def scalet_get_facts(self):
-        scalet = self.search('scalet', self.module.params['name'], self.vscale.scalet_list(), self.module)
+        scalet = self.search('scalet', self.module.params['name'], self.vscale.scalet_list())
         return self.vscale.scalet_get(scalet)
 
     def create_scalet(self):
