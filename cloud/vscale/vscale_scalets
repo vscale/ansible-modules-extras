@@ -407,8 +407,14 @@ class VscaleAnsible:
                     changed=True, msg="Scalet %s rebuilded" % self.module.params['name'])
 
             elif self.module.params['upgrade'] == 'yes' and self.module.params['plan']:
-                self.vscale.scalet_upgrade(scalet, self.module.params['plan'])
-                self.module.exit_json(changed=True, msg="Scalet %s upgraded to %s plan" % (
+                #Check rplan
+                rplan = self.vscale.scalet_get(scalet)['rplan']
+                if rplan != self.module.params['plan']:
+                  self.vscale.scalet_upgrade(scalet, self.module.params['plan'])
+                  self.module.exit_json(changed=True, msg="Scalet %s upgraded to %s plan" % (
+                    self.module.params['name'], self.module.params['plan']))
+                else:
+                  self.module.exit_json(changed=False, msg="Scalet %s is alerady uses %s tariff" % (
                     self.module.params['name'], self.module.params['plan']))
                 
             elif self.module.params['public_key_name']:
