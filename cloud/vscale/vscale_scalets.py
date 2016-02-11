@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 #
 # (c) 2015, Vscale Team <hello@vscale.io>
 #
@@ -27,7 +27,7 @@ description:
     - Rebuild, upgrades scalets
     - Provides scalets power management
     - Collects ansible facts after creation of the scalet
-version_added: "1.0"
+version_added: "2.1"
 author: Sergey Krasnopivets (@skrasnopivets)
 options:
   token:
@@ -84,7 +84,7 @@ requirements:
 notes:
   - To create a scalet, you can specify either the key or password
   - Several keys can be added to public_key_name as key_name1, key_name2 (see examples)
-  - API token  may be get from OS enviroment named VS_API_KEY.
+  - API token  may be get from OS enviroment named VS_API_KEY
 '''
 
 EXAMPLES = '''

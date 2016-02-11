@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 #
 # (c) 2015, Vscale Team <hello@vscale.io>
 #
@@ -24,7 +24,7 @@ short_description: vscale.io scalets management
 description:
     - Addes SSH key
     - Deletes SSH key
-version_added: "1.0"
+version_added: "2.1"
 author: Sergey Krasnopivets (@skrasnopivets)
 options:
   token:
@@ -69,7 +69,6 @@ EXAMPLES = '''
 
 import requests
 import json
-import logging
 from time import sleep
 import time
 import os
